@@ -101,6 +101,44 @@ def test_migrate_config_restores_backup_when_version_does_not_advance(
     assert backups, "backup file must exist"
 
 
+def test_a_successful_migration_leaves_no_copy_of_a_file_it_never_touched(
+    tmp_path, monkeypatch
+):
+    """The backup of an untouched .env is a second plaintext credential copy (#158376)."""
+    import hermes_cli.config as cfg
+    import hermes_cli.config_version_stamp as stamp
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("_config_version: 20\n", encoding="utf-8")
+    env_path = tmp_path / ".env"
+    env_path.write_text("OPENAI_API_KEY=test-only-not-a-secret\n", encoding="utf-8")
+
+    monkeypatch.setattr(stamp, "read_config_version_stamp", lambda **kw: (20, 34))
+    monkeypatch.setattr(cfg, "check_config_version", lambda: (34, 34))
+    monkeypatch.setattr(cfg, "get_config_path", lambda: config_path)
+    monkeypatch.setattr(cfg, "get_env_path", lambda: env_path)
+
+    def fake_migrate(**kw):
+        # The version bump is the migration's only edit; .env is left alone.
+        config_path.write_text(
+            "_config_version: 34\nschema-key: value\n", encoding="utf-8"
+        )
+        return {}
+
+    monkeypatch.setattr(cfg, "migrate_config", lambda **kw: fake_migrate(**kw))
+
+    result = step_migrate_config()
+
+    assert result["ok"] is True, result
+    assert not list(tmp_path.glob(".env.bak-*")), (
+        "a migration that never wrote .env must not leave a copy of the secrets file"
+    )
+    assert env_path.read_text(encoding="utf-8") == "OPENAI_API_KEY=test-only-not-a-secret\n"
+    assert list(tmp_path.glob("config.yaml.bak-*")), (
+        "the file the migration did change keeps its backup"
+    )
+
+
 def test_boot_keeps_the_steps_before_a_failing_one_and_retries_it_each_start(
     tmp_path, monkeypatch, capsys
 ):

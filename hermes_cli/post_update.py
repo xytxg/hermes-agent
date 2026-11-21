@@ -128,6 +128,10 @@ def step_migrate_config() -> dict:
                 "migrated": f"{current_ver}->{post_ver}",
                 "error": f"config migration to v{failed} failed; kept v{current_ver}->v{post_ver}, "
                          "retried on the next start"}
+    # A step that never wrote .env leaves a byte-identical copy of it: a second plaintext
+    # credential file, which is what the failed-step path already declines to keep. A file
+    # the migration did change keeps its backup.
+    _drop_unchanged_backups(backups)
     return {"ok": True, "migrated": f"{current_ver}->{latest_ver}"}
 
 
